@@ -26,6 +26,7 @@ git clone <ce dépôt> && cd <ce dépôt>
 Sans certificat Apple Developer, l'app est signée localement (« ad hoc ») : elle marche sur le Mac qui l'a compilée.
 
 Corrections et idées bienvenues : ouvre une *issue* ou une *pull request*. Licence MIT (voir `LICENSE`).
+La police Geist (`Resources/Fonts`) est sous licence SIL Open Font License (`Resources/Fonts/OFL.txt`).
 
 ## Utilisation
 
