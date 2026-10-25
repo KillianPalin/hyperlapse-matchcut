@@ -89,6 +89,20 @@ struct UndoTest {
         check(p.frames[4].rotationKey == nil, "⌘Z retire la clé de rotation")
         p.clearPoints(at: 0)
         check(p.frames[0].guide(.mirrorA) != nil, "effacer le point ne touche pas à la ligne")
+        // A missed photo taken out of the series, then put back.
+        let ids = p.frames.map(\.id), refID = p.frames[p.refIndex].id
+        p.current = 2
+        p.removeCurrentPhoto()
+        check(p.frames.count == 4 && !p.frames.contains { $0.id == ids[2] } && p.current == 2, "retirer la photo 3")
+        check(p.frames[p.refIndex].id == refID, "la référence reste la même photo")
+        p.current = p.refIndex
+        p.removeCurrentPhoto()
+        check(p.frames.count == 3 && p.frames.indices.contains(p.refIndex), "retirer la référence : une autre la remplace")
+        p.undo(); p.undo()
+        check(p.frames.map(\.id) == ids && p.frames[p.refIndex].id == refID, "⌘Z remet les photos à leur place, avec la référence")
+        p.redo()
+        check(p.frames.count == 4 && !p.frames.contains { $0.id == ids[2] }, "⇧⌘Z la retire à nouveau")
+        p.undo()
         exit(failures == 0 ? 0 : 1)
     }
 }

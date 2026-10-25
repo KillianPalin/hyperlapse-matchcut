@@ -97,6 +97,9 @@ struct HyperlapseApp: App {
                 Button("Définir comme référence") { project.makeReference() }.keyboardShortcut("r")
                 Button("Effacer le repère de cette photo") { project.clearPoints(at: project.current) }
                     .keyboardShortcut(.delete, modifiers: [])
+                Button("Retirer cette photo de la série") { project.removeCurrentPhoto() }
+                    .keyboardShortcut(.delete, modifiers: [.command])
+                    .disabled(project.frames.count < 2 || project.isTracking)
                 Divider()
                 Button("Zoom avant") { project.zoomCanvas(1.5) }.keyboardShortcut("+")
                 Button("Zoom arrière") { project.zoomCanvas(1 / 1.5) }.keyboardShortcut("-")
@@ -436,6 +439,10 @@ struct FilmstripView: View {
                                       key: project.isRotationKey(i), what: project.editTarget == .anchor ? "point" : "ligne")
                                 .id(i)
                                 .onTapGesture { project.current = i }
+                                .contextMenu {
+                                    Button("Retirer cette photo de la série") { project.current = i; project.removeCurrentPhoto() }
+                                        .disabled(project.frames.count < 2 || project.isTracking)
+                                }
                         }
                     }
                     .padding(.horizontal, Theme.pad)
@@ -932,6 +939,11 @@ struct InspectorView: View {
                         .disabled(project.current + 1 >= project.frames.count)
                         .help(project.editTarget == .anchor ? "Efface les repères de toutes les photos suivantes (⌘Z pour revenir)"
                               : "Efface cette ligne sur toutes les photos suivantes (⌘Z pour revenir)")
+                    Spacer(minLength: 0)
+                    Button { project.removeCurrentPhoto() } label: { Image(systemName: "trash") }
+                        .buttonStyle(HLButtonStyle(kind: .ghost))
+                        .disabled(project.frames.count < 2 || project.isTracking)
+                        .help("Retire cette photo de la série, par exemple une photo ratée (⌘⌫). Le fichier reste sur le disque, ⌘Z la remet.")
                 }
             }
             if project.isMatchCut, project.frames.count > 1 {

@@ -168,6 +168,8 @@ final class Project: ObservableObject {
     /// Anchors of the other kinds: switching kind never loses work.
     private var stash: [AnchorKind: [UUID: Anchor]] = [:]
     private var undoStack: [Snapshot] = []
+    /// Photos taken out of the series, kept so that ⌘Z can put them back.
+    private var removedFrames: [UUID: Frame] = [:]
     private var redoStack: [Snapshot] = []
     private var restoring = false
     @Published private(set) var canUndo = false
@@ -812,7 +814,7 @@ final class Project: ObservableObject {
         stash = s.stash
         if frames.map(\.id) != s.order {
             // Back to the order of the photos at that time (a sort is undone too).
-            let byID = Dictionary(uniqueKeysWithValues: frames.map { ($0.id, $0) })
+            let byID = removedFrames.merging(frames.map { ($0.id, $0) }) { _, now in now }
             let currentID = currentFrame?.id
             frames = s.order.compactMap { byID[$0] }
             if let id = currentID, let i = frames.firstIndex(where: { $0.id == id }) { current = i }
@@ -1062,6 +1064,32 @@ final class Project: ObservableObject {
             restoring = false
             notice = "Photo déplacée en position \(to + 1). Rangement automatique coupé pour garder ton ordre (⌘Z pour revenir)."
         }
+    }
+
+    /// Takes the current photo out of the series (a missed shot). The file itself is left alone; ⌘Z puts it back.
+    func removeCurrentPhoto() {
+        guard frames.count > 1, frames.indices.contains(current), !isTracking else { return }
+        registerUndo()
+        let refID = frames[refIndex].id
+        let removed = frames[current]
+        removedFrames[removed.id] = removed
+        let at = current
+        frames.remove(at: at)
+        var note = ""
+        if let i = frames.firstIndex(where: { $0.id == refID }) {
+            refIndex = i
+        } else {
+            // It was the reference: the nearest photo that has its marker takes over.
+            let placed = frames.indices.filter { frames[$0].points != nil }
+            refIndex = placed.min { abs($0 - at) < abs($1 - at) } ?? min(at, frames.count - 1)
+            note = " C'était la référence : la photo \(refIndex + 1) la remplace."
+        }
+        let next = min(at, frames.count - 1)
+        if current == next { currentChanged() } else { current = next }  // another photo now sits at this place
+        invalidatePlayback()
+        refreshAligned()
+        if !isMatchCut, stabMotion != nil { note += " Relance l'analyse de stabilisation." }
+        notice = "\(removed.url.lastPathComponent) retirée de la série (le fichier reste sur le disque).\(note) ⌘Z pour la remettre."
     }
 
     /// Match cut: the frame found on this photo is right as it is. It becomes placed by hand (orange), so the search
