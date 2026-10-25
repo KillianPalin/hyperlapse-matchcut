@@ -129,16 +129,26 @@ enum Renderer {
     /// Motion Tile: the photo repeated all around itself (each copy flipped against its neighbour with `.mirror`, so
     /// the seams do not show), cut to the part that lands on the canvas (`inv`: canvas pixels -> photo pixels).
     private static func tiled(_ img: CIImage, _ mode: EdgeMode, covering canvas: CGSize, through inv: Mat3) -> CIImage {
-        let e = img.extent, w = e.width, h = e.height
-        var cell = img
+        // The repeated cell is the photo minus its outer pixel, on whole pixels: after a reduction the border pixels
+        // are half transparent and the size is fractional, which left a dark seam between the copies.
+        let e = img.extent
+        let inner = CGRect(x: ceil(e.minX) + 1, y: ceil(e.minY) + 1,
+                           width: floor(e.maxX) - ceil(e.minX) - 2, height: floor(e.maxY) - ceil(e.minY) - 2)
+        guard inner.width > 8, inner.height > 8 else { return img }
+        let w = inner.width, h = inner.height
+        let base = img.cropped(to: inner).transformed(by: CGAffineTransform(translationX: -inner.minX, y: -inner.minY))
+        var cell = base
         if mode == .mirror {
-            let flipX = img.transformed(by: CGAffineTransform(a: -1, b: 0, c: 0, d: 1, tx: 2 * w, ty: 0))
-            let flipY = img.transformed(by: CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: 2 * h))
-            let flipXY = img.transformed(by: CGAffineTransform(a: -1, b: 0, c: 0, d: -1, tx: 2 * w, ty: 2 * h))
-            cell = img.composited(over: flipX).composited(over: flipY).composited(over: flipXY)
+            // Each flipped copy reaches 2 pixels under its neighbours, so no seam is ever half transparent.
+            let padded = base.clampedToExtent().cropped(to: CGRect(x: -2, y: -2, width: w + 4, height: h + 4))
+            let flipX = padded.transformed(by: CGAffineTransform(a: -1, b: 0, c: 0, d: 1, tx: 2 * w, ty: 0))
+            let flipY = padded.transformed(by: CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: 2 * h))
+            let flipXY = padded.transformed(by: CGAffineTransform(a: -1, b: 0, c: 0, d: -1, tx: 2 * w, ty: 2 * h))
+            cell = base.composited(over: flipX).composited(over: flipY).composited(over: flipXY)
                 .cropped(to: CGRect(x: 0, y: 0, width: 2 * w, height: 2 * h))
         }
         let tiles = cell.applyingFilter("CIAffineTile", parameters: [kCIInputTransformKey: NSAffineTransform()])
+            .transformed(by: CGAffineTransform(translationX: inner.minX, y: inner.minY))
         // Only the part that reaches the canvas (a finite image, which the perspective filter needs).
         let corners = [CGPoint(x: 0, y: 0), CGPoint(x: canvas.width, y: 0), CGPoint(x: canvas.width, y: canvas.height),
                        CGPoint(x: 0, y: canvas.height)].map(inv.apply)
