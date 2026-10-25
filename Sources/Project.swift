@@ -1393,6 +1393,12 @@ final class Project: ObservableObject {
         }
     }
 
+    /// Writes the session at once (before quitting or restarting for an update).
+    func saveNow() {
+        saveTask?.cancel()
+        write(to: sessionFile)
+    }
+
     private func write(to url: URL) {
         let saved = Dictionary(uniqueKeysWithValues: stash.map { kind, anchors in
             (kind.rawValue, Dictionary(uniqueKeysWithValues: anchors.map { ($0.key.uuidString, $0.value) }))

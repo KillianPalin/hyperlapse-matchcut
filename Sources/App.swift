@@ -16,11 +16,20 @@ final class AppState: ObservableObject {
     private var links: [AnyCancellable] = []
 
     var active: Project { mode == .hyperlapse ? hyperlapse : matchCut }
+    /// The one window's state, for the app delegate (saving at quit).
+    static weak var current: AppState?
+
+    func saveAll() {
+        hyperlapse.saveNow()
+        matchCut.saveNow()
+    }
 
     init() {
         mode = WorkMode(rawValue: UserDefaults.standard.string(forKey: "mode") ?? "") ?? .hyperlapse
         // The menus follow the tool in use.
         links = [hyperlapse, matchCut].map { p in p.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() } }
+        AppState.current = self
+        Updater.shared.beforeRestart = { [weak self] in self?.saveAll() }
     }
 }
 
@@ -40,6 +49,11 @@ struct HyperlapseApp: App {
         }
         .windowStyle(.hiddenTitleBar)
         .commands {
+            CommandGroup(after: .appInfo) {
+                Button("Rechercher les mises à jour…") { checkForUpdates() }
+                Toggle("Mises à jour automatiques", isOn: Binding(get: { Updater.shared.automatic },
+                                                                  set: { Updater.shared.automatic = $0 }))
+            }
             CommandGroup(replacing: .undoRedo) {
                 Button("Annuler") { project.undo() }.keyboardShortcut("z").disabled(!project.canUndo && !project.isTracking)
                 Button("Rétablir") { project.redo() }.keyboardShortcut("z", modifiers: [.command, .shift])
@@ -127,8 +141,53 @@ struct HyperlapseApp: App {
     }
 }
 
+@MainActor
+private func checkForUpdates() {
+    Task { @MainActor in
+        let updater = Updater.shared
+        await updater.check(userInitiated: true)
+        let alert = NSAlert()
+        switch updater.state {
+        case .upToDate:
+            alert.messageText = "Hyperlapse/Match cut est à jour"
+            alert.informativeText = "Version \(Updater.currentVersion)."
+        case .ready(let v):
+            alert.messageText = "La version \(v) est prête"
+            alert.informativeText = "Elle s'installera à la fermeture de l'app, ou tout de suite avec Redémarrer."
+            alert.addButton(withTitle: "Redémarrer")
+            alert.addButton(withTitle: "Plus tard")
+            if alert.runModal() == .alertFirstButtonReturn { updater.restartNow() }
+            return
+        case .available(let v, let page):
+            alert.messageText = "La version \(v) est disponible"
+            alert.informativeText = "Cette copie a été compilée depuis le code : récupère les changements avec git pull, puis ./Tools/build.sh."
+            alert.addButton(withTitle: "Voir la version")
+            alert.addButton(withTitle: "Fermer")
+            if alert.runModal() == .alertFirstButtonReturn { NSWorkspace.shared.open(page) }
+            return
+        case .failed(let m):
+            alert.messageText = "Vérification impossible"
+            alert.informativeText = m
+        default:
+            return
+        }
+        alert.runModal()
+    }
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        MainActor.assumeIsolated { Updater.shared.start() }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        MainActor.assumeIsolated {
+            AppState.current?.saveAll()
+            Updater.shared.installIfReady()
+        }
+    }
 }
 
 struct ContentView: View {
@@ -174,6 +233,7 @@ struct ContentView: View {
 struct TopBar: View {
     @ObservedObject var project: Project
     @Binding var mode: WorkMode
+    @ObservedObject private var updater = Updater.shared
 
     var body: some View {
         ZStack {
@@ -218,6 +278,7 @@ struct TopBar: View {
                         project.togglePlayback()
                     }
                 }
+                updateBadge
                 Button("Importer") { project.openPanel() }
                     .buttonStyle(HLButtonStyle(kind: project.frames.isEmpty ? .primary : .secondary))
                     .fixedSize()
@@ -234,6 +295,24 @@ struct TopBar: View {
             .padding(.trailing, Theme.gap + 4)
         }
         .frame(height: Theme.barHeight)
+    }
+
+    /// A new version waiting: one click restarts on it (it installs itself at quit anyway).
+    @ViewBuilder private var updateBadge: some View {
+        switch updater.state {
+        case .ready(let v):
+            Button { updater.restartNow() } label: { Pill(text: "Version \(v) prête · Redémarrer", color: Theme.text) }
+                .buttonStyle(.plain)
+                .help("La nouvelle version est téléchargée et vérifiée. Elle s'installe à la fermeture de l'app, ou tout de suite en cliquant ici.")
+                .fixedSize()
+        case .available(let v, let page):
+            Button { NSWorkspace.shared.open(page) } label: { Pill(text: "Version \(v) disponible", color: Theme.text) }
+                .buttonStyle(.plain)
+                .help("Copie compilée depuis le code : git pull puis ./Tools/build.sh pour la mettre à jour.")
+                .fixedSize()
+        default:
+            EmptyView()
+        }
     }
 
     private var seriesName: String {

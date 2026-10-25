@@ -6,6 +6,7 @@ set -e
 ROOT=${0:A:h:h}
 cd "$ROOT"
 ARCH=$(uname -m)
+VERSION=$(cat "$ROOT/VERSION")
 BUILD="$ROOT/.build"
 APP="$BUILD/HYPERLAPSE.app"
 mkdir -p "$BUILD"
@@ -33,8 +34,8 @@ cat > "$APP/Contents/Info.plist" <<EOF
   <key>CFBundleDisplayName</key><string>Hyperlapse/Match cut</string>
   <key>CFBundleIdentifier</key><string>com.killian.hyperlapse</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>1.0</string>
-  <key>CFBundleVersion</key><string>1</string>
+  <key>CFBundleShortVersionString</key><string>$VERSION</string>
+  <key>CFBundleVersion</key><string>$VERSION</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundleDevelopmentRegion</key><string>fr</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>

@@ -16,6 +16,12 @@ Une photo = une image de la vidéo. Export ProRes, H.264, HEVC, séquences TIFF 
 L'app n'est pas notarisée par Apple : au premier lancement, **clic droit sur l'app > Ouvrir > Ouvrir**
 (ou Réglages Système > Confidentialité et sécurité > « Ouvrir quand même »). Une seule fois suffit.
 
+**Mises à jour automatiques** (à partir de la 1.1) : l'app vérifie au lancement puis toutes les 6 h s'il y a une nouvelle
+version sur GitHub, la télécharge, vérifie qu'elle est signée par le même développeur, prévient (bandeau en haut et
+notification) et s'installe à la fermeture de l'app, ou tout de suite avec « Redémarrer ». Menu de l'app :
+« Rechercher les mises à jour… » et « Mises à jour automatiques ». Une copie compilée depuis le code n'est jamais
+remplacée : elle signale seulement la nouvelle version (`git pull` puis `./Tools/build.sh`).
+
 **Depuis le code** (pour le modifier) :
 ```sh
 xcode-select --install        # outils de développement Apple, une seule fois (pas besoin de Xcode complet)
@@ -91,6 +97,7 @@ placées seules, 13 justes sur 14, la dernière (gros reflet sur le logo) rattra
 
 ## Développement
 
+- `./Tools/release.sh "notes"` : publie la version écrite dans `VERSION` sur GitHub (les apps installées la récupèrent seules).
 - `./Tools/build.sh` : compile et installe `/Applications/HYPERLAPSE.app` (sans projet Xcode).
 - `./Tools/selftest.sh` : faux hyperlapse de 30 photos 6000×4000 au mouvement connu ; mesure suivi, alignement, export.
 - `./Tools/undotest.sh` : vérifie ⌘Z et la conservation des repères par mode (après `selftest.sh`).
