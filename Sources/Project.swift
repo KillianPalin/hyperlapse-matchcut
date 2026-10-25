@@ -235,7 +235,12 @@ final class Project: ObservableObject {
     var outputSize: CGSize {
         if let s = settings.output.size { return s }
         guard frames.indices.contains(refIndex) else { return CGSize(width: 3840, height: 2160) }
-        let s = frames[refIndex].pixelSize
+        var s = frames[refIndex].pixelSize
+        // Shape of the photos, but no more than 4K on the long side (ProRes at full photo size is very heavy).
+        if settings.output == .original4k, max(s.width, s.height) > 3840 {
+            let k = 3840 / max(s.width, s.height)
+            s = CGSize(width: (s.width * k).rounded(), height: (s.height * k).rounded())
+        }
         // Even sizes, as video codecs require.
         return CGSize(width: Double(Int(s.width) / 2 * 2), height: Double(Int(s.height) / 2 * 2))
     }

@@ -5,11 +5,12 @@ import ImageIO
 import UniformTypeIdentifiers
 
 enum OutputPreset: String, Codable, CaseIterable, Identifiable, Sendable {
-    case original, uhd, dci4k, hd, vertical4k, vertical, portrait
+    case original, original4k, uhd, dci4k, hd, vertical4k, vertical, portrait
     var id: String { rawValue }
     var label: String {
         switch self {
         case .original: "Taille de la photo de référence"
+        case .original4k: "Format des photos, 4K max"
         case .uhd: "4K UHD 3840 × 2160"
         case .dci4k: "4K DCI 4096 × 2160"
         case .hd: "HD 1920 × 1080"
@@ -18,10 +19,10 @@ enum OutputPreset: String, Codable, CaseIterable, Identifiable, Sendable {
         case .portrait: "Portrait 4:5 1080 × 1350"
         }
     }
-    /// nil = size of the reference photo.
+    /// nil = size of the reference photo (at most 3840 px on its long side with `.original4k`).
     var size: CGSize? {
         switch self {
-        case .original: nil
+        case .original, .original4k: nil
         case .uhd: CGSize(width: 3840, height: 2160)
         case .dci4k: CGSize(width: 4096, height: 2160)
         case .hd: CGSize(width: 1920, height: 1080)

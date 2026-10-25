@@ -119,6 +119,8 @@ struct SelfTest {
         print(String(format: "Lissage léger : erreur moyenne %.3f° (le roulis du test est aléatoire, le lissage ne peut que l'augmenter)", sm.mean))
         // Rendered: the line must come out level on the canvas.
         project.settings.smoothing = .none
+        project.settings.output = .original4k
+        print("Format des photos, 4K max :", project.outputSize, "(photos 6000 × 4000)")
         project.settings.output = .hd
         if let plan = project.plan {
             let gc = plan.refToCanvas(CGSize(width: 1920, height: 1080))
