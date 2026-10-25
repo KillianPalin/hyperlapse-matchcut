@@ -40,9 +40,12 @@ La police Geist (`Resources/Fonts`) est sous licence SIL Open Font License (`Res
 2. Vue **Placer** : poser le repère sur la première photo (loupe ×4 pendant le placement).
 3. **Suivre à partir de cette photo** (⌘T) : le repère est retrouvé sur les suivantes.
    Le suivi s'arrête s'il perd le repère. Le replacer à la main et relancer.
+   **Suivre vers l'arrière** (⌥⌘T) : même suivi en remontant jusqu'à la première photo, quand le repère est plus net
+   sur la dernière.
    Pour un match cut (scènes différentes), activer **Clic = photo suivante** et cliquer photo après photo.
 4. Vue **Aligné** : contrôle avec la pelure d'oignon, **Lecture** (espace) pour voir l'hyperlapse.
 5. **Zoom auto** retire les bords noirs, puis **Exporter** (⌘E) : ProRes 422 HQ / 4444, H.264, HEVC, séquence TIFF 16 bits ou JPEG.
+   Taille **Format des photos, 4K max** : le format des photos, côté long limité à 3840 px (ProRes bien plus léger).
 
 - **Zoom dans la photo** : pincement ou molette (autour du pointeur), deux doigts pour se déplacer, ⌘+ / ⌘− / ⌘0.
   **⌥ + flèches** déplace le repère d'un pixel (⇧⌥ : 10 pixels).
@@ -69,6 +72,8 @@ La police Geist (`Resources/Fonts`) est sous licence SIL Open Font License (`Res
 - **Bords** (Cadrage de sortie, dans les deux outils) : **Noir** (le zoom auto cache les bandes) ou **Motion Tile** (la photo
   alignée est répétée tout autour, comme l'effet d'After Effects), avec **Miroir** pour retourner chaque copie et
   rendre les raccords invisibles. Aperçu, lecture et export suivent le réglage.
+- **Retirer une photo ratée** (dans les deux outils) : ⌘⌫, clic droit sur la vignette ou la corbeille de « Cette photo ».
+  Le fichier reste sur le disque, ⌘Z la remet à sa place.
 - **⌘Z / ⇧⌘Z** annulent et rétablissent : placement, effacement, référence, changement de mode, et un suivi entier d'un coup.
 - **Point, Règle et Cadre gardent chacun leurs repères** : passer de l'un à l'autre ne supprime rien.
 - Piste de fiabilité sous la pellicule : orange = à la main, gris = suivi (hauteur = fiabilité), rouge = à vérifier.
