@@ -97,6 +97,12 @@ Sélecteur **Hyperlapse / Match cut** en haut à gauche (⌃⌘1 / ⌃⌘2). Cha
 5. Vue Aligné, puis export. **Durée de chaque photo** (fenêtre d'export) : 1, 2 ou 3 images de la vidéo par photo
    (chaque photo est calculée une fois puis répétée ; en séquence, le fichier est dupliqué). La lecture suit ce réglage. « Redresser la perspective » fait tomber les 4 coins exactement sur ceux de la référence.
 
+- **Forme** (section Élément) : Auto (une étoile ou une forme ronde est reconnue dans le cadre tracé sur la référence
+  et calée sur son contour), Cadre (tout le rectangle compte : logos, textes), Rond / ovale, Étoile, ou Plume (clic
+  point par point autour de l'objet, clic sur le premier point pour fermer, ou contour à main levée). Avec une forme,
+  seul l'élément compte dans la recherche, pas le décor ; une étoile est cherchée à toutes les rotations puis tournée
+  comme la référence. Entre deux endroits qui se ressemblent, l'app préfère la place de l'élément sur la référence
+  (souvent le centre).
 6. **Rangement automatique** (activé par défaut) : après ⌘T, l'app mesure l'élément sur chaque photo et les range du plus
    petit au plus gros ; les photos où il n'est pas trouvé vont à la fin. Pour imposer ton ordre : « Ordre » dans
    Cette photo (Première, ←, →, Dernière, ou ⌥⌘← / ⌥⌘→). Déplacer une photo à la main coupe le rangement automatique.
