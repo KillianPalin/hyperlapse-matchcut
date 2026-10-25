@@ -149,12 +149,14 @@ enum ExportError: LocalizedError {
 
 enum Exporter {
     /// Writes the aligned series. For a video, `destination` is the file; for a sequence, a folder.
+    /// `hold`: number of frames each photo lasts (each photo is rendered once and repeated).
     static func run(items: [ExportItem], refToCanvas: Mat3, canvas: CGSize, format: ExportFormat, fps: FrameRate,
-                    destination: URL, progress: @escaping @Sendable (Double) -> Void) async throws {
+                    hold: Int = 1, destination: URL, progress: @escaping @Sendable (Double) -> Void) async throws {
+        let hold = max(1, hold)
         if format.isSequence {
-            try await writeSequence(items, refToCanvas, canvas, format, destination, progress)
+            try await writeSequence(items, refToCanvas, canvas, format, hold, destination, progress)
         } else {
-            try await writeVideo(items, refToCanvas, canvas, format, fps, destination, progress)
+            try await writeVideo(items, refToCanvas, canvas, format, fps, hold, destination, progress)
         }
     }
 
@@ -164,16 +166,16 @@ enum Exporter {
     }
 
     private static func writeSequence(_ items: [ExportItem], _ refToCanvas: Mat3, _ canvas: CGSize, _ format: ExportFormat,
-                                      _ folder: URL, _ progress: @Sendable (Double) -> Void) async throws {
+                                      _ hold: Int, _ folder: URL, _ progress: @Sendable (Double) -> Void) async throws {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let base = folder.lastPathComponent
-        let digits = max(4, String(items.count).count)
+        let digits = max(4, String(items.count * hold).count)
         let space = CGColorSpace(name: CGColorSpace.sRGB)!
         for (i, item) in items.enumerated() {
             try Task.checkCancellation()
             try autoreleasepool {
                 let img = try frame(item, refToCanvas, canvas)
-                let name = "\(base)_\(String(format: "%0\(digits)d", i + 1)).\(format.fileExtension)"
+                let name = "\(base)_\(String(format: "%0\(digits)d", i * hold + 1)).\(format.fileExtension)"
                 let url = folder.appendingPathComponent(name)
                 let type = (format == .tiff ? UTType.tiff : UTType.jpeg).identifier as CFString
                 guard let cg = Renderer.context.createCGImage(img, from: img.extent, format: format == .tiff ? .RGBA16 : .RGBA8,
@@ -183,13 +185,19 @@ enum Exporter {
                 let props: [CFString: Any] = format == .jpeg ? [kCGImageDestinationLossyCompressionQuality: 0.95] : [:]
                 CGImageDestinationAddImage(dest, cg, props as CFDictionary)
                 guard CGImageDestinationFinalize(dest) else { throw ExportError.writer(name) }
+                // The same image again for each extra frame the photo lasts.
+                for r in 1..<hold {
+                    let copy = folder.appendingPathComponent("\(base)_\(String(format: "%0\(digits)d", i * hold + r + 1)).\(format.fileExtension)")
+                    try? FileManager.default.removeItem(at: copy)
+                    try FileManager.default.copyItem(at: url, to: copy)
+                }
             }
             progress(Double(i + 1) / Double(items.count))
         }
     }
 
     private static func writeVideo(_ items: [ExportItem], _ refToCanvas: Mat3, _ canvas: CGSize, _ format: ExportFormat,
-                                   _ fps: FrameRate, _ url: URL, _ progress: @Sendable (Double) -> Void) async throws {
+                                   _ fps: FrameRate, _ hold: Int, _ url: URL, _ progress: @Sendable (Double) -> Void) async throws {
         try? FileManager.default.removeItem(at: url)
         let writer = try AVAssetWriter(outputURL: url, fileType: format == .h264 ? .mp4 : .mov)
         let w = Int(canvas.width), h = Int(canvas.height)
@@ -222,6 +230,7 @@ enum Exporter {
         writer.startSession(atSourceTime: .zero)
         let space = CGColorSpace(name: CGColorSpace.itur_709)!
 
+        var lastBuffer: CVPixelBuffer?
         do {
             for (i, item) in items.enumerated() {
                 try Task.checkCancellation()
@@ -233,9 +242,20 @@ enum Exporter {
                           CVPixelBufferPoolCreatePixelBuffer(nil, pool, &buffer) == kCVReturnSuccess, let pb = buffer
                     else { throw ExportError.writer("tampon vidéo indisponible") }
                     Renderer.context.render(img, to: pb, bounds: CGRect(x: 0, y: 0, width: w, height: h), colorSpace: space)
-                    let time = CMTimeMultiply(fps.frameDuration, multiplier: Int32(i))
+                    let time = CMTimeMultiply(fps.frameDuration, multiplier: Int32(i * hold))
                     guard adaptor.append(pb, withPresentationTime: time) else {
                         throw ExportError.writer(writer.error?.localizedDescription ?? "image \(i + 1)")
+                    }
+                    hold > 1 ? (lastBuffer = pb) : (lastBuffer = nil)
+                }
+                // The same frame again for each extra frame the photo lasts (a constant frame rate for the editing software).
+                if let pb = lastBuffer {
+                    for r in 1..<hold {
+                        while !input.isReadyForMoreMediaData { try await Task.sleep(nanoseconds: 5_000_000) }
+                        let time = CMTimeMultiply(fps.frameDuration, multiplier: Int32(i * hold + r))
+                        guard adaptor.append(pb, withPresentationTime: time) else {
+                            throw ExportError.writer(writer.error?.localizedDescription ?? "image \(i + 1)")
+                        }
                     }
                 }
                 progress(Double(i + 1) / Double(items.count))
@@ -246,7 +266,7 @@ enum Exporter {
             throw error
         }
         input.markAsFinished()
-        writer.endSession(atSourceTime: CMTimeMultiply(fps.frameDuration, multiplier: Int32(items.count)))
+        writer.endSession(atSourceTime: CMTimeMultiply(fps.frameDuration, multiplier: Int32(items.count * hold)))
         await writer.finishWriting()
         if writer.status != .completed { throw ExportError.writer(writer.error?.localizedDescription ?? "échec") }
     }

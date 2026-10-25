@@ -879,11 +879,12 @@ final class ExportModel: ObservableObject {
         let canvas = project.outputSize
         let g = plan.refToCanvas(canvas)
         let fps = project.settings.fps
+        let hold = project.isMatchCut ? project.settings.holdFrames : 1  // a hyperlapse is always one frame per photo
         done = nil; error = nil; progress = 0
         task = Task { [weak self] in
             do {
                 try await Exporter.run(items: items, refToCanvas: g, canvas: canvas, format: format, fps: fps,
-                                       destination: url) { p in
+                                       hold: hold, destination: url) { p in
                     Task { @MainActor in self?.progress = p }
                 }
                 self?.done = url
@@ -922,6 +923,15 @@ struct ExportSheet: View {
                     ForEach(FrameRate.allCases) { Text($0.label).tag($0) }
                 }
                 .disabled(project.settings.format.isSequence)
+                if project.isMatchCut {
+                    Picker("Durée de chaque photo", selection: $project.settings.holdFrames) {
+                        Text("1 image").tag(1)
+                        Text("2 images").tag(2)
+                        Text("3 images").tag(3)
+                    }
+                    .pickerStyle(.segmented)
+                    .help("Chaque photo est répétée sur 1, 2 ou 3 images de la vidéo (ou de la séquence).")
+                }
             }
             .formStyle(.grouped)
             .scrollContentBackground(.hidden)
@@ -971,9 +981,12 @@ struct ExportSheet: View {
     }
 
     private var summary: String {
-        let n = project.frames.count, size = project.outputSize
-        if project.settings.format.isSequence { return "\(n) images · \(Int(size.width)) × \(Int(size.height))" }
-        return String(format: "%d images · %.2f s · %d × %d", n, Double(n) / project.settings.fps.value,
+        let photos = project.frames.count, size = project.outputSize
+        let hold = project.isMatchCut ? project.settings.holdFrames : 1
+        let n = photos * hold
+        let what = hold > 1 ? "\(photos) photos × \(hold) = \(n) images" : "\(n) images"
+        if project.settings.format.isSequence { return "\(what) · \(Int(size.width)) × \(Int(size.height))" }
+        return String(format: "%@ · %.2f s · %d × %d", what, Double(n) / project.settings.fps.value,
                       Int(size.width), Int(size.height))
     }
 

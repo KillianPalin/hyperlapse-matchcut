@@ -74,7 +74,8 @@ Sélecteur **Hyperlapse / Match cut** en haut à gauche (⌃⌘1 / ⌃⌘2). Cha
    Un coin déplacé à la main reste où il est mis. Toute correction fait passer la photo en orange (placée à la main) et
    la recherche n'y touche plus. Cadre rouge déjà juste : « Le cadre est bon, valider » (↩). On peut corriger pendant
    que la recherche tourne.
-5. Vue Aligné, puis export. « Redresser la perspective » fait tomber les 4 coins exactement sur ceux de la référence.
+5. Vue Aligné, puis export. **Durée de chaque photo** (fenêtre d'export) : 1, 2 ou 3 images de la vidéo par photo
+   (chaque photo est calculée une fois puis répétée ; en séquence, le fichier est dupliqué). La lecture suit ce réglage. « Redresser la perspective » fait tomber les 4 coins exactement sur ceux de la référence.
 
 6. **Rangement automatique** (activé par défaut) : après ⌘T, l'app mesure l'élément sur chaque photo et les range du plus
    petit au plus gros ; les photos où il n'est pas trouvé vont à la fin. Pour imposer ton ordre : « Ordre » dans

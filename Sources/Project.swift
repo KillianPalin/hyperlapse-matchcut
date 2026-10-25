@@ -1356,7 +1356,8 @@ final class Project: ObservableObject {
     private func startLoop() {
         playing = true
         let frames = playbackFrames
-        let delay = UInt64(1_000_000_000 / settings.fps.value)
+        let hold = isMatchCut ? Double(settings.holdFrames) : 1  // match cut: each photo lasts 1, 2 or 3 frames
+        let delay = UInt64(1_000_000_000 * hold / settings.fps.value)
         playTask = Task { [weak self] in
             var i = 0
             while !Task.isCancelled {

@@ -245,6 +245,8 @@ struct AlignSettings: Codable, Equatable, Sendable {
     var sizeMode: SizeMode = .same
     /// Match cut: after the search, the photos are put in order of the element's size, smallest first.
     var autoSort = true
+    /// Match cut: how many frames of the video each photo lasts (1, 2 or 3).
+    var holdFrames = 1
 
     init() {}
 
@@ -268,6 +270,7 @@ struct AlignSettings: Codable, Equatable, Sendable {
         snapFrames = try c.decodeIfPresent(Bool.self, forKey: .snapFrames) ?? d.snapFrames
         sizeMode = try c.decodeIfPresent(SizeMode.self, forKey: .sizeMode) ?? d.sizeMode
         autoSort = try c.decodeIfPresent(Bool.self, forKey: .autoSort) ?? d.autoSort
+        holdFrames = min(max(try c.decodeIfPresent(Int.self, forKey: .holdFrames) ?? d.holdFrames, 1), 3)
     }
 
     var fitModel: FitModel {
