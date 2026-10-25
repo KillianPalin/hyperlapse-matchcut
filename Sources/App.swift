@@ -625,8 +625,23 @@ struct InspectorView: View {
     private var matchCutSection: some View {
         Group {
             title("Élément")
-            Text("Glisse en diagonale autour du logo, de la forme ou du texte, sur la photo où il est le plus net : elle devient la référence. Ajuste les coins si besoin, puis ⌘T.")
+            Text(project.settings.shapeKind == .pen
+                 ? "Plume : sur la photo où l'élément est le plus net, clique point par point autour de lui puis clique le premier point pour fermer (ou dessine-le à main levée). Puis ⌘T."
+                 : "Glisse en diagonale autour du logo, de la forme ou du texte, sur la photo où il est le plus net : elle devient la référence. Ajuste les coins si besoin, puis ⌘T.")
                 .font(Theme.small).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true).lineSpacing(2)
+            row("Forme") {
+                Picker("Forme", selection: $project.settings.shapeKind) {
+                    ForEach(ShapeKind.allCases) { Text($0.label).tag($0) }
+                }
+                .labelsHidden().fixedSize()
+                .help("Auto : l'app reconnaît d'elle-même une étoile ou une forme ronde dans le cadre tracé. Seul l'élément compte alors dans la recherche, pas le décor autour. Cadre : tout le rectangle compte (logo, texte). Plume : tu dessines le contour d'un objet spécial.")
+            }
+            if project.shaping {
+                Text("Reconnaissance de la forme…").font(Theme.small).foregroundStyle(Theme.muted)
+            } else if let shape = project.elementShape, project.plan != nil {
+                Text("Forme de la référence : " + (shape.kind == .star ? "étoile" : shape.kind == .ellipse ? "rond / ovale" : "contour dessiné"))
+                    .font(Theme.small).foregroundStyle(Theme.muted)
+            }
             row("Ajuster mes cadres sur l'élément") { toggle($project.settings.snapFrames) }
                 .help("Un cadre tracé grossièrement à la main est calé sur l'élément, coins compris.")
             row("Redresser la perspective") { toggle($project.settings.perspective) }

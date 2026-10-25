@@ -253,6 +253,10 @@ struct AlignSettings: Codable, Equatable, Sendable {
     var autoSort = true
     /// Match cut: how many frames of the video each photo lasts (1, 2 or 3).
     var holdFrames = 1
+    /// Match cut: shape of the element (Auto recognizes a star or a round shape in the frame drawn on the reference),
+    /// and the shape found or drawn there (nil: the whole frame).
+    var shapeKind: ShapeKind = .auto
+    var elementShape: ElementShape?
     /// Motion Tile around the photo instead of black edges, and with Mirror the tiles are flipped so seams vanish.
     var motionTile = false
     var tileMirror = true
@@ -289,6 +293,8 @@ struct AlignSettings: Codable, Equatable, Sendable {
         sizeMode = try c.decodeIfPresent(SizeMode.self, forKey: .sizeMode) ?? d.sizeMode
         autoSort = try c.decodeIfPresent(Bool.self, forKey: .autoSort) ?? d.autoSort
         holdFrames = min(max(try c.decodeIfPresent(Int.self, forKey: .holdFrames) ?? d.holdFrames, 1), 3)
+        shapeKind = try c.decodeIfPresent(ShapeKind.self, forKey: .shapeKind) ?? d.shapeKind
+        elementShape = try c.decodeIfPresent(ElementShape.self, forKey: .elementShape)
         motionTile = try c.decodeIfPresent(Bool.self, forKey: .motionTile) ?? d.motionTile
         tileMirror = try c.decodeIfPresent(Bool.self, forKey: .tileMirror) ?? d.tileMirror
         stabEnabled = try c.decodeIfPresent(Bool.self, forKey: .stabEnabled) ?? d.stabEnabled

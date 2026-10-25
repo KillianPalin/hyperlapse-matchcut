@@ -119,6 +119,11 @@ struct PlaceView: View {
     @State private var hover: CGPoint?
     @State private var canvasSize: CGSize = .zero
     @State private var monitor: Any?
+    /// Plume: points clicked so far around the element, and the outline being drawn freehand.
+    @State private var penPoints: [CGPoint] = []
+    @State private var lasso: [CGPoint]?
+
+    private var penMode: Bool { project.isMatchCut && project.settings.shapeKind == .pen && project.editTarget == .anchor }
 
     var body: some View {
         GeometryReader { geo in
@@ -127,7 +132,7 @@ struct PlaceView: View {
             ZStack(alignment: .topLeading) {
                 Palette.canvas
                 photo(fit)
-                Canvas { ctx, _ in drawOverlay(&ctx, fit) }
+                Canvas { ctx, _ in drawOverlay(&ctx, fit); drawPen(&ctx, fit) }
                     .allowsHitTesting(false)
                 if let at = loupeAt, let img = project.preview, project.canvasZoom < 3 {
                     let onLeft = fit.view(at).x > geo.size.width / 2
@@ -154,6 +159,8 @@ struct PlaceView: View {
             .onAppear { canvasSize = geo.size; installMonitor() }
             .onChange(of: geo.size) { _, s in canvasSize = s }
             .onDisappear { if let m = monitor { NSEvent.removeMonitor(m); monitor = nil } }
+            .onChange(of: project.current) { _, _ in penPoints = [] }
+            .onChange(of: project.settings.shapeKind) { _, _ in penPoints = [] }
         }
     }
 
@@ -240,9 +247,61 @@ struct PlaceView: View {
                 : (status == .tracked && live == nil && target != .anchor ? Palette.status(.tracked) : Palette.anchor)
             drawAnchor(&ctx, pts.map(fit.view), kind: editKind, color: color, ghost: false, bounds: fit.rect)
             if let g = target.guide { tag(&ctx, g.label, pts.map(fit.view), color) }
+            // Match cut: the element's shape inside its frame (star, round shape, outline drawn).
+            if target == .anchor, pts.count == 4, let shape = project.elementShape {
+                let m = fitTransform(from: [CGPoint(x: 0, y: 0), CGPoint(x: 1, y: 0), CGPoint(x: 1, y: 1), CGPoint(x: 0, y: 1)],
+                                     to: pts.map(fit.view), model: .homography)
+                var path = Path()
+                path.addLines(shape.outline().map(m.apply)); path.closeSubpath()
+                ctx.stroke(path, with: .color(.black.opacity(0.55)), style: StrokeStyle(lineWidth: 4, lineJoin: .round))
+                ctx.stroke(path, with: .color(color), style: StrokeStyle(lineWidth: 2, lineJoin: .round))
+            }
         } else if let guide = project.guidePoints(at: project.current) {
             drawAnchor(&ctx, guide.map(fit.view), kind: editKind, color: Palette.anchor, ghost: true, bounds: fit.rect)
             if let g = target.guide { tag(&ctx, g.label + " · glisse une poignée pour la poser ici", guide.map(fit.view), .white.opacity(0.7)) }
+        }
+    }
+
+    /// Plume being drawn: the points clicked (the first one larger, click it to close) or the freehand outline.
+    private func drawPen(_ ctx: inout GraphicsContext, _ fit: Fit) {
+        let pts = (lasso ?? penPoints).map(fit.view)
+        guard !pts.isEmpty else { return }
+        var path = Path()
+        path.addLines(pts)
+        if let h = hover, lasso == nil { path.addLine(to: h) }
+        ctx.stroke(path, with: .color(.black.opacity(0.55)), style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round))
+        ctx.stroke(path, with: .color(Palette.anchor), style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+        guard lasso == nil else { return }
+        for (i, p) in pts.enumerated() {
+            let r: CGFloat = i == 0 ? 7 : 4
+            let dot = Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: 2 * r, height: 2 * r))
+            ctx.fill(dot, with: .color(i == 0 ? Palette.anchor.opacity(0.35) : Palette.anchor))
+            ctx.stroke(dot, with: .color(Palette.anchor), lineWidth: 1.5)
+        }
+    }
+
+    /// Plume: a click adds a point (on the first one, closes the outline); a drag draws the outline freehand.
+    private func penChanged(_ v: DragGesture.Value, _ fit: Fit, _ clamp: (CGPoint) -> CGPoint) {
+        let moved = hypot(v.location.x - v.startLocation.x, v.location.y - v.startLocation.y) > 4
+        guard moved, penPoints.isEmpty else { return }
+        var l = lasso ?? [clamp(fit.frame(v.startLocation))]
+        let p = clamp(fit.frame(v.location))
+        if let last = l.last, hypot(fit.view(last).x - v.location.x, fit.view(last).y - v.location.y) >= 3 { l.append(p) }
+        lasso = l
+    }
+
+    private func penEnded(_ v: DragGesture.Value, _ fit: Fit, _ clamp: (CGPoint) -> CGPoint) {
+        if let l = lasso {
+            lasso = nil
+            if l.count >= 6 { project.setOutline(l, at: project.current) }
+            return
+        }
+        let p = clamp(fit.frame(v.location))
+        if penPoints.count >= 3, hypot(fit.view(penPoints[0]).x - v.location.x, fit.view(penPoints[0]).y - v.location.y) < 12 {
+            project.setOutline(penPoints, at: project.current)
+            penPoints = []
+        } else {
+            penPoints.append(p)
         }
     }
 
@@ -264,6 +323,11 @@ struct PlaceView: View {
                     CGPoint(x: min(max(p.x, 0), aspect), y: min(max(p.y, 0), 1))
                 }
                 let start = clamp(fit.frame(v.startLocation)), loc = clamp(fit.frame(v.location))
+                // Plume: unless a corner of the frame already there is taken, clicks and drags draw the outline.
+                if drag == nil, penMode, !penPoints.isEmpty || lasso != nil || !grabsFrame(v.startLocation, fit) {
+                    penChanged(v, fit, clamp)
+                    return
+                }
                 if drag == nil { drag = begin(at: v.startLocation, start: start, fit) }
                 switch drag {
                 case .handle(let i, var base)?:
@@ -277,7 +341,12 @@ struct PlaceView: View {
                 case nil: break
                 }
             }
-            .onEnded { _ in
+            .onEnded { v in
+                if drag == nil, penMode {
+                    let aspect = project.currentAspect
+                    penEnded(v, fit) { CGPoint(x: min(max($0.x, 0), aspect), y: min(max($0.y, 0), 1)) }
+                    return
+                }
                 defer { drag = nil; live = nil; loupeAt = nil }
                 guard let pts = live else { return }
                 if case .create? = drag {
@@ -291,6 +360,13 @@ struct PlaceView: View {
                 project.setPoints(pts, at: project.current, snap: project.editTarget.guide != nil || (project.isMatchCut && drawn))
                 if project.settings.advanceOnClick, project.settings.kind == .point, project.editTarget == .anchor { project.step(1) }
             }
+    }
+
+    /// A corner of the frame already placed is under the pointer (or the pointer is inside it).
+    private func grabsFrame(_ v: CGPoint, _ fit: Fit) -> Bool {
+        guard let ex = project.targetPoints(at: project.current), ex.count == 4 else { return false }
+        let views = ex.map(fit.view)
+        return views.contains { hypot($0.x - v.x, $0.y - v.y) < 14 }
     }
 
     private func begin(at v: CGPoint, start: CGPoint, _ fit: Fit) -> DragKind {

@@ -99,6 +99,7 @@ private struct Snapshot {
     var stash: [AnchorKind: [UUID: Anchor]]
     var guides: [UUID: Guides]
     var order: [UUID]
+    var shape: ElementShape?
 }
 
 /// The two tools of the app, each with its own photos and session: they never touch each other.
@@ -644,6 +645,8 @@ final class Project: ObservableObject {
             // Match cut: the first element framed is the reference, whatever photo it is on.
             if isMatchCut, k != refIndex, frames.indices.contains(refIndex), frames[refIndex].points == nil { refIndex = k }
             if snap, isMatchCut, settings.snapFrames, k != refIndex { fitDrawnFrame(at: k, drawn: pts) }
+            // The frame drawn on the reference: a star or a round shape in it is recognized and laid on its outline.
+            if snap, isMatchCut, k == refIndex { shapeReference(drawn: pts) }
         }
         invalidatePlayback()
         refreshAligned()
@@ -726,6 +729,7 @@ final class Project: ObservableObject {
 
     private func settingsChanged(_ old: AlignSettings) {
         if settings.kind != .point, editTarget != .anchor { editTarget = .anchor }
+        if settings.shapeKind != old.shapeKind, !restoring { shapeKindChanged() }
         if settings.kind != old.kind, !restoring {
             // Each kind keeps its own anchors: put the old ones aside and bring back those of the new kind.
             registerUndo(kind: old.kind)
@@ -780,7 +784,7 @@ final class Project: ObservableObject {
     private func snapshot(kind: AnchorKind? = nil) -> Snapshot {
         let guides = Dictionary(uniqueKeysWithValues: frames.compactMap { f in f.guides.map { (f.id, $0) } })
         return Snapshot(anchors: currentAnchors(), kind: kind ?? settings.kind, refIndex: refIndex, stash: stash, guides: guides,
-                        order: frames.map(\.id))
+                        order: frames.map(\.id), shape: settings.elementShape)
     }
 
     private func registerUndo(kind: AnchorKind? = nil) {
@@ -811,6 +815,7 @@ final class Project: ObservableObject {
     private func restore(_ s: Snapshot) {
         restoring = true
         if settings.kind != s.kind { settings.kind = s.kind }
+        if settings.elementShape != s.shape { settings.elementShape = s.shape }
         stash = s.stash
         if frames.map(\.id) != s.order {
             // Back to the order of the photos at that time (a sort is undone too).
@@ -831,6 +836,8 @@ final class Project: ObservableObject {
     // MARK: - Tracking
 
     @Published private(set) var isTracking = false
+    /// Match cut: the shape of the reference is being recognized.
+    @Published private(set) var shaping = false
     /// Number of the tracking run; a step finishing after its run was stopped is dropped.
     private var trackRun = 0
 
@@ -1025,10 +1032,12 @@ final class Project: ObservableObject {
 
     /// Puts the photos in order of the element's size as photographed (smallest first, or largest first). Photos
     /// where the element is not placed go to the end. ⌘Z gives the previous order back.
-    func sortBySize(ascending: Bool) {
+    /// `search`: when the element is not placed everywhere yet, look for it first (not after a search: the photos
+    /// where it was not found go to the end, else the search would start again forever).
+    func sortBySize(ascending: Bool, search: Bool = true) {
         guard frames.count > 1, !isTracking else { return }
         // Not measured everywhere yet: find the element on every photo first, then sort.
-        if frames.contains(where: { $0.points == nil }), plan != nil {
+        if search, frames.contains(where: { $0.points == nil }), plan != nil {
             pendingSort = ascending
             findMatches()
             return
@@ -1135,8 +1144,8 @@ final class Project: ObservableObject {
         trackingProgress = 0
         notice = nil
         let engine = MatchCutEngine(previews: previews)
-        let refURL = frames[refIndex].url
-        guard let ref = await Task.detached(priority: .userInitiated, operation: { engine.reference(url: refURL, quad: refQuad) }).value else {
+        let refURL = frames[refIndex].url, shape = elementShape
+        guard let ref = await Task.detached(priority: .userInitiated, operation: { engine.reference(url: refURL, quad: refQuad, shape: shape) }).value else {
             isTracking = false; trackingProgress = nil; trackTask = nil
             notice = "Le cadre de la référence est trop petit ou la photo est illisible."
             return
@@ -1157,7 +1166,9 @@ final class Project: ObservableObject {
             guard run == trackRun, !Task.isCancelled else { return }
             if frames[k].status == .manual { trackingProgress = Double(n + 1) / Double(todo.count); continue }
             if let f = found, f.score >= 0.4 {
-                frames[k].anchor = Anchor(points: f.quad, status: f.score >= 0.7 ? .tracked : .doubtful, score: f.score)
+                // With a shape, the score already includes its outline lying on the photo's edges: sure sooner.
+                let sure = shape == nil ? 0.7 : 0.6
+                frames[k].anchor = Anchor(points: f.quad, status: f.score >= sure ? .tracked : .doubtful, score: f.score)
                 if f.score >= 0.6 { hints.append(f.quad) }
             } else {
                 frames[k].anchor = Anchor()
@@ -1174,7 +1185,7 @@ final class Project: ObservableObject {
         var sorted = ""
         if let asc = pendingSort ?? (settings.autoSort ? true : nil), frames.indices.filter({ elementSize($0) != nil }).count > 1 {
             let missedIDs = missed.map { frames[$0].id }
-            sortBySize(ascending: asc)
+            sortBySize(ascending: asc, search: false)
             missed = missedIDs.compactMap { id in frames.firstIndex { $0.id == id } }
             sorted = asc ? " Photos rangées du plus petit au plus gros." : " Photos rangées du plus gros au plus petit."
         }
@@ -1190,14 +1201,98 @@ final class Project: ObservableObject {
         refreshAligned()
     }
 
+    // MARK: - Shape of the element (match cut)
+
+    /// Shape the search uses: the one recognized or drawn on the reference, unless « Cadre » is chosen.
+    var elementShape: ElementShape? { settings.shapeKind == .rect ? nil : settings.elementShape }
+
+    /// Gives the reference its shape from the frame drawn on it: recognized (Auto), looked for (Étoile, Rond / ovale),
+    /// or none (Cadre).
+    private func shapeReference(drawn: [CGPoint]) {
+        switch settings.shapeKind {
+        case .rect: setShape(nil)
+        case .pen: break
+        case .auto, .star, .ellipse: recognizeShape(at: refIndex, in: drawn, expect: drawn)
+        }
+    }
+
+    private func setShape(_ shape: ElementShape?) {
+        guard settings.elementShape != shape else { return }
+        restoring = true
+        settings.elementShape = shape
+        restoring = false
+    }
+
+    /// Looks for the shape in `area` (frame space) on photo `k`, then lays the frame on it. `expect`: the frame of the
+    /// photo when it starts (if it changes meanwhile, the result is dropped).
+    private func recognizeShape(at k: Int, in area: [CGPoint], expect: [CGPoint]) {
+        let kind = settings.shapeKind
+        let only: ShapeKind? = kind == .auto ? nil : kind
+        let engine = MatchCutEngine(previews: previews), url = frames[k].url
+        shaping = true
+        Task { [weak self] in
+            let found = await Task.detached(priority: .userInitiated) { engine.recognize(url: url, quad: area, only: only) }.value
+            guard let self else { return }
+            self.shaping = false
+            guard self.frames.indices.contains(k), k == self.refIndex, self.frames[k].points == expect, self.settings.shapeKind == kind else { return }
+            if let found {
+                self.frames[k].points = found.quad
+                self.setShape(found.shape)
+                self.notice = (found.shape.kind == .star ? "Étoile reconnue" : "Forme ronde reconnue")
+                    + " et calée sur son contour. ⌘T pour la chercher sur les autres photos (⌘Z revient au cadre tracé)."
+            } else if let only {
+                // Asked for this shape but none is clear here: it fills the frame drawn, to adjust by its corners.
+                self.setShape(ElementShape(kind: only))
+                self.notice = "Pas de contour net de " + (only == .star ? "l'étoile" : "la forme ronde")
+                    + " dans ce cadre : la forme remplit ton cadre, ajuste ses coins si besoin."
+            } else {
+                self.setShape(nil)
+            }
+            self.invalidatePlayback()
+            self.refreshAligned()
+        }
+    }
+
+    /// The shape chosen in the panel changed: the reference takes it at once.
+    private func shapeKindChanged() {
+        guard isMatchCut, frames.indices.contains(refIndex), let quad = frames[refIndex].points, quad.count == 4 else { return }
+        switch settings.shapeKind {
+        case .rect: setShape(nil)
+        case .pen:
+            if settings.elementShape?.kind != .pen {
+                notice = "Plume : clique point par point autour de l'élément sur la référence, puis clique le premier point pour fermer. Tu peux aussi le dessiner à main levée."
+            }
+        case .auto, .star, .ellipse:
+            // A little more room than the frame, so that the whole outline can be found.
+            let c = centroid(quad)
+            let area = quad.map { CGPoint(x: c.x + ($0.x - c.x) * 1.15, y: c.y + ($0.y - c.y) * 1.15) }
+            recognizeShape(at: refIndex, in: area, expect: quad)
+        }
+    }
+
+    /// Plume: an outline drawn around the element (frame space). On the reference (or the first photo framed), it
+    /// becomes the element's shape; on another photo, it is a rough frame around the element, fitted like one.
+    func setOutline(_ outline: [CGPoint], at k: Int) {
+        guard isMatchCut, frames.indices.contains(k), let pen = ElementShape.pen(outline) else { return }
+        let isRef = k == refIndex || !frames.indices.contains(refIndex) || frames[refIndex].points == nil
+        guard isRef else { setPoints(pen.quad, at: k, snap: true); return }
+        registerUndo()
+        frames[k].anchor = Anchor(points: pen.quad, status: .manual, score: nil)
+        if k != refIndex { refIndex = k }
+        setShape(pen.shape)
+        notice = "Contour de l'élément enregistré : seul ce qui est dedans compte dans la recherche. ⌘T pour le chercher sur les autres photos."
+        invalidatePlayback()
+        refreshAligned()
+    }
+
     /// A frame drawn roughly by hand around the element is fitted onto it, corners included.
     private func fitDrawnFrame(at k: Int, drawn: [CGPoint]) {
         guard frames.indices.contains(refIndex), let refQuad = frames[refIndex].points, refQuad.count == 4 else { return }
         let engine = MatchCutEngine(previews: previews)
-        let refURL = frames[refIndex].url, url = frames[k].url
+        let refURL = frames[refIndex].url, url = frames[k].url, shape = elementShape
         Task { [weak self] in
             let found = await Task.detached(priority: .userInitiated) { () -> MatchCutEngine.Found? in
-                guard let ref = engine.reference(url: refURL, quad: refQuad) else { return nil }
+                guard let ref = engine.reference(url: refURL, quad: refQuad, shape: shape) else { return nil }
                 return engine.find(ref, url: url, near: drawn)
             }.value
             guard let self, self.frames.indices.contains(k), self.frames[k].points == drawn else { return }
