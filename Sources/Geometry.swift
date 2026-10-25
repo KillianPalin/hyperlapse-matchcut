@@ -258,6 +258,13 @@ struct AlignSettings: Codable, Equatable, Sendable {
     var tileMirror = true
 
     var edgeMode: EdgeMode { motionTile ? (tileMirror ? .mirror : .tile) : .black }
+    /// Hyperlapse stabilization (after the alignment), see Stabilizer.
+    var stabEnabled = false
+    var stabResult: StabResult = .smooth
+    var stabSmoothness = 50.0
+    var stabKeepPoint = true
+    var stabRotation = true
+    var stabScale = true
 
     init() {}
 
@@ -284,6 +291,12 @@ struct AlignSettings: Codable, Equatable, Sendable {
         holdFrames = min(max(try c.decodeIfPresent(Int.self, forKey: .holdFrames) ?? d.holdFrames, 1), 3)
         motionTile = try c.decodeIfPresent(Bool.self, forKey: .motionTile) ?? d.motionTile
         tileMirror = try c.decodeIfPresent(Bool.self, forKey: .tileMirror) ?? d.tileMirror
+        stabEnabled = try c.decodeIfPresent(Bool.self, forKey: .stabEnabled) ?? d.stabEnabled
+        stabResult = try c.decodeIfPresent(StabResult.self, forKey: .stabResult) ?? d.stabResult
+        stabSmoothness = try c.decodeIfPresent(Double.self, forKey: .stabSmoothness) ?? d.stabSmoothness
+        stabKeepPoint = try c.decodeIfPresent(Bool.self, forKey: .stabKeepPoint) ?? d.stabKeepPoint
+        stabRotation = try c.decodeIfPresent(Bool.self, forKey: .stabRotation) ?? d.stabRotation
+        stabScale = try c.decodeIfPresent(Bool.self, forKey: .stabScale) ?? d.stabScale
     }
 
     var fitModel: FitModel {

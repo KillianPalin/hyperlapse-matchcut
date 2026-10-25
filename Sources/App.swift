@@ -555,6 +555,10 @@ struct InspectorView: View {
                         rule
                         section { orientationSection }
                     }
+                    if !project.isMatchCut {
+                        rule
+                        section { stabilizationSection }
+                    }
                     rule
                     section { photoSection }
                     rule
@@ -818,6 +822,67 @@ struct InspectorView: View {
         }
         .buttonStyle(HLButtonStyle(kind: .secondary, height: 24))
         .help("Tourne la photo autour du point et pose une image clé (⌥[ et ⌥] avec Point choisi). Entre deux clés, la rotation est interpolée.")
+    }
+
+    private var stabilizationSection: some View {
+        Group {
+            title("Stabilisation")
+            Text("Une fois le point aligné, le décor peut encore tourner, grossir ou glisser d'une photo à l'autre. L'analyse mesure ce mouvement, puis le lisse ou le supprime, comme le Warp Stabilizer d'After Effects. Appliqué à l'aperçu, à la lecture et à l'export.")
+                .font(Theme.small).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true).lineSpacing(2)
+            if let p = project.trackingProgress, project.isTracking, project.notice?.hasPrefix("Analyse de la stabilisation") == true {
+                GeometryReader { g in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(Theme.raised)
+                        Capsule().fill(Theme.text).frame(width: max(4, g.size.width * p))
+                    }
+                }
+                .frame(height: 4)
+            }
+            Button { project.analyzeStabilization() } label: {
+                HStack {
+                    Text(project.stabAnalyzed ? "Analyser à nouveau" : "Analyser")
+                    Spacer()
+                    Text(stabStatus).foregroundStyle(Theme.muted)
+                }
+            }
+            .buttonStyle(HLButtonStyle(kind: .secondary, fullWidth: true, height: 32))
+            .disabled(project.isTracking || project.plan == nil)
+            if project.stabMotion != nil, !project.stabAnalyzed {
+                Text("Les repères ont changé depuis l'analyse : relance-la pour stabiliser.")
+                    .font(Theme.small).foregroundStyle(Theme.negative).fixedSize(horizontal: false, vertical: true)
+            }
+            if project.stabAnalyzed {
+                row("Stabiliser") { toggle($project.settings.stabEnabled) }
+                if project.settings.stabEnabled {
+                    row("Résultat") {
+                        Picker("Résultat", selection: $project.settings.stabResult) {
+                            ForEach(StabResult.allCases) { Text($0.label).tag($0) }
+                        }
+                        .labelsHidden().fixedSize()
+                        .help("Mouvement lissé : garde le mouvement de caméra en retirant les à-coups. Sans mouvement : le décor ne bouge plus.")
+                    }
+                    if project.settings.stabResult == .smooth {
+                        HStack(spacing: 10) {
+                            Text("Lissage").frame(width: 52, alignment: .leading)
+                            Slider(value: $project.settings.stabSmoothness, in: 0...100)
+                            Text(String(format: "%.0f %%", project.settings.stabSmoothness)).monospacedDigit()
+                                .foregroundStyle(Theme.muted).frame(width: 44, alignment: .trailing)
+                        }
+                    }
+                    row("Garder le point fixe") { toggle($project.settings.stabKeepPoint) }
+                        .help("La stabilisation tourne et zoome autour de ton point sans le déplacer.")
+                    row("Corriger la rotation") { toggle($project.settings.stabRotation) }
+                    row("Corriger l'échelle") { toggle($project.settings.stabScale) }
+                        .help("Désactivé : la taille du décor n'est pas touchée (Preserve Scale d'After Effects).")
+                    Text("Bords : Zoom auto ou Motion Tile, dans Cadrage de sortie.").font(Theme.small).foregroundStyle(Theme.muted)
+                }
+            }
+        }
+    }
+
+    private var stabStatus: String {
+        if project.stabAnalyzed { return "\(project.stabMeasured + 1) / \(project.frames.count) photos" }
+        return project.stabMotion == nil ? "pas encore fait" : "à refaire"
     }
 
     private var hasGuideHere: Bool {

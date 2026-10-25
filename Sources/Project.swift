@@ -121,6 +121,9 @@ private struct ProjectFile: Codable {
     var settings: AlignSettings
     /// Anchors of the kinds not shown (kind -> photo id -> anchor), kept when switching between point, ruler and frame.
     var stash: [String: [String: Anchor]]?
+    /// Stabilization analysis: motion between consecutive aligned photos, and what it was measured on.
+    var stabMotion: [[Double]?]?
+    var stabSignature: String?
 }
 
 @MainActor
@@ -279,8 +282,16 @@ final class Project: ObservableObject {
     }
 
     /// Photo k -> reference. A photo without anchor borrows the alignment of its nearest neighbour.
-    /// With lines, the photo also turns around its point so that they stay straight.
+    /// With lines, the photo also turns around its point so that they stay straight; with the stabilization, it
+    /// then gets the small correction that puts the picture on its smoothed path.
     func frameToRef(_ k: Int, plan: AlignmentPlan) -> Mat3 {
+        let raw = alignedFrameToRef(k, plan: plan)
+        guard let c = stabCorrections(plan: plan), c.indices.contains(k) else { return raw }
+        return c[k] * raw
+    }
+
+    /// The alignment alone, before stabilization (what the stabilization analysis looks at).
+    func alignedFrameToRef(_ k: Int, plan: AlignmentPlan) -> Mat3 {
         var src = frames[k].points
         if src == nil {
             for d in 1..<max(frames.count, 2) {
@@ -297,6 +308,108 @@ final class Project: ObservableObject {
         let theta = rotations.indices.contains(k) ? rotations[k] : 0
         guard theta != 0, plan.settings.kind == .point, let p = pts.first else { return base }
         return base * .translation(Double(p.x), Double(p.y)) * .rotation(theta) * .translation(-Double(p.x), -Double(p.y))
+    }
+
+    // MARK: - Stabilization (hyperlapse)
+
+    @Published private(set) var stabMotion: [Mat3?]?
+    private(set) var stabSignature: String?
+    private var stabCache: (key: String, value: [Mat3])?
+
+    /// What the analysis depends on: if the anchors, the lines or the reference change, it has to be done again.
+    var currentStabSignature: String {
+        let pts = frames.map { $0.points.map { $0.map { String(format: "%.5f,%.5f", $0.x, $0.y) }.joined(separator: ";") } ?? "-" }
+        let rot = rotations.map { String(format: "%.5f", $0) }
+        return Stabilizer.fingerprint("\(refIndex)|\(settings.kind)|\(settings.correctScale)|\(settings.perspective)|\(settings.level)|"
+            + pts.joined(separator: "|") + "|" + rot.joined(separator: ","))
+    }
+
+    var stabAnalyzed: Bool { stabMotion?.count == frames.count && stabSignature == currentStabSignature }
+    var stabMeasured: Int { stabMotion?.dropFirst().filter { $0 != nil }.count ?? 0 }
+
+    private func stabCorrections(plan: AlignmentPlan) -> [Mat3]? {
+        guard !isMatchCut, settings.stabEnabled, stabAnalyzed, let motion = stabMotion else { return nil }
+        let pivot = centroid(plan.refPoints)
+        let key = "\(settings.stabResult)|\(settings.stabSmoothness)|\(settings.stabKeepPoint)|\(settings.stabRotation)|"
+            + "\(settings.stabScale)|\(refIndex)|\(pivot)|\(stabSignature ?? "")"
+        if let c = stabCache, c.key == key { return c.value }
+        let value = Stabilizer.corrections(motion: motion, pivot: pivot, result: settings.stabResult, smoothness: settings.stabSmoothness,
+                                           rotation: settings.stabRotation, scale: settings.stabScale,
+                                           keepPoint: settings.stabKeepPoint, reference: refIndex)
+        stabCache = (key, value)
+        return value
+    }
+
+    /// Measures how the picture still moves from one aligned photo to the next (Analyser).
+    func analyzeStabilization() {
+        guard !isMatchCut, trackTask == nil, let plan else {
+            notice = "Place d'abord le repère sur la photo de référence, et suis-le sur la série."
+            return
+        }
+        guard frames.count > 2 else { return }
+        trackRun += 1
+        let run = trackRun
+        isTracking = true
+        trackTask = Task { [weak self] in await self?.runStabAnalysis(plan: plan, run: run) }
+    }
+
+    private func runStabAnalysis(plan: AlignmentPlan, run: Int) async {
+        trackingProgress = 0
+        notice = "Analyse de la stabilisation… (le suivi des photos RAW prend un peu plus de temps)"
+        let o = outputSize, s = 960 / max(o.width, o.height)
+        let canvas = CGSize(width: (o.width * s).rounded(), height: (o.height * s).rounded())
+        var p = plan
+        p.settings.zoom = 1
+        let g = p.refToCanvas(canvas)
+        guard let canvasToRef = g.inverse else { return }
+        let signature = currentStabSignature
+        let jobs = frames.indices.map { (frames[$0].url, alignedFrameToRef($0, plan: plan)) }
+        let previews = self.previews
+        var motion: [Mat3?] = [nil]
+        var prev: GrayImage?
+        for (k, job) in jobs.enumerated() {
+            for u in jobs.dropFirst(k + 1).prefix(2).map(\.0) where previews.cached(u) == nil {
+                Task.detached(priority: .utility) { _ = previews.image(for: u) }
+            }
+            let gray = await Task.detached(priority: .userInitiated) { () -> GrayImage? in
+                guard let img = previews.image(for: job.0),
+                      let cg = Renderer.cgImage(Renderer.render(CIImage(cgImage: img), frameToRef: job.1, refToCanvas: g, canvas: canvas))
+                else { return nil }
+                return GrayImage(cg, longEdge: Int(max(canvas.width, canvas.height)))
+            }.value
+            guard run == trackRun, !Task.isCancelled else { return }
+            if k > 0 {
+                if let a = prev, let b = gray {
+                    let m = await Task.detached(priority: .userInitiated) {
+                        // Measured as a free similarity; keeping the point is applied when correcting.
+                        Stabilizer.measure(prev: a, next: b, canvasToRef: canvasToRef, pivot: nil)
+                    }.value
+                    motion.append(m?.motion)
+                } else {
+                    motion.append(nil)
+                }
+            }
+            prev = gray
+            trackingProgress = Double(k + 1) / Double(jobs.count)
+        }
+        isTracking = false
+        trackingProgress = nil
+        trackTask = nil
+        stabMotion = motion
+        stabSignature = signature
+        stabCache = nil
+        if !settings.stabEnabled {
+            restoring = true
+            settings.stabEnabled = true
+            restoring = false
+        }
+        scheduleSave()
+        invalidatePlayback()
+        refreshAligned()
+        let missing = motion.dropFirst().filter { $0 == nil }.count
+        notice = missing == 0
+            ? "Stabilisation analysée sur les \(frames.count) photos et activée. Règle le lissage, puis vérifie en lecture."
+            : "Stabilisation analysée et activée. \(missing) passage(s) sans assez de détails communs : ils restent tels quels."
     }
 
     // MARK: - Rotation from the lines
@@ -1312,7 +1425,9 @@ final class Project: ObservableObject {
     private var playbackSignature: String {
         let pts = frames.map { $0.points.map { $0.map { "\($0.x),\($0.y)" }.joined(separator: ";") } ?? "-" }
         return "\(refIndex)|\(settings.kind)|\(settings.level)|\(settings.correctScale)|\(settings.perspective)|"
-            + "\(settings.centerAnchor)|\(settings.zoom)|\(settings.output)|\(settings.sizeMode)|\(settings.edgeMode)|" + pts.joined(separator: "|")
+            + "\(settings.centerAnchor)|\(settings.zoom)|\(settings.output)|\(settings.sizeMode)|\(settings.edgeMode)|"
+            + "\(settings.stabEnabled)\(settings.stabResult)\(settings.stabSmoothness)\(settings.stabKeepPoint)\(settings.stabRotation)"
+            + "\(settings.stabScale)\(stabAnalyzed)|" + pts.joined(separator: "|")
             + "|" + rotations.map { String($0) }.joined(separator: ",")
     }
 
@@ -1408,7 +1523,8 @@ final class Project: ObservableObject {
         let saved = Dictionary(uniqueKeysWithValues: stash.map { kind, anchors in
             (kind.rawValue, Dictionary(uniqueKeysWithValues: anchors.map { ($0.key.uuidString, $0.value) }))
         })
-        let file = ProjectFile(frames: frames, refIndex: refIndex, settings: settings, stash: saved)
+        let file = ProjectFile(frames: frames, refIndex: refIndex, settings: settings, stash: saved,
+                               stabMotion: stabMotion?.map { $0?.m }, stabSignature: stabSignature)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted]
         try? encoder.encode(file).write(to: url, options: .atomic)
@@ -1430,6 +1546,10 @@ final class Project: ObservableObject {
             restored[k] = Dictionary(uniqueKeysWithValues: anchors.compactMap { id, a in UUID(uuidString: id).map { ($0, a) } })
         }
         load(frames: present, refIndex: present.firstIndex { $0.id == refID } ?? 0, stash: restored)
+        if present.count == file.frames.count, let m = file.stabMotion {
+            stabMotion = m.map { $0.map(Mat3.init) }
+            stabSignature = file.stabSignature
+        }
         if present.count < file.frames.count {
             notice = "\(file.frames.count - present.count) photo(s) introuvable(s), retirée(s) du projet."
         }

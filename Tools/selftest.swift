@@ -132,6 +132,47 @@ struct SelfTest {
             }
             print(String(format: "Sortie : inclinaison max de la ligne %.3f°, dérive max du point %.2f px (HD)", tilt, pointDrift))
         }
+        // 3c. Stabilization: point only (no lines), the background still turns (±2.5°) and grows (+25 %).
+        project.settings.rotation = .off
+        project.settings.zoom = 1
+        func wobble() -> (angle: Double, scale: Double, jitter: Double) {
+            // How the line target -> target2 moves on the output: spread of its angle, of its length, and frame-to-frame jumps.
+            guard let plan = project.plan else { return (0, 0, 0) }
+            let gc = plan.refToCanvas(CGSize(width: 1920, height: 1080))
+            var angles: [Double] = [], lengths: [Double] = []
+            for k in 0..<count {
+                let m = gc * project.frameToRef(k, plan: plan)
+                let a = m.apply(truth[k][0]), b = m.apply(truth[k][1])
+                angles.append(atan2(Double(b.y - a.y), Double(b.x - a.x)) * 180 / .pi)
+                lengths.append(hypot(Double(b.x - a.x), Double(b.y - a.y)))
+            }
+            func sd(_ v: [Double]) -> Double { let m = v.reduce(0, +) / Double(v.count); return sqrt(v.map { ($0 - m) * ($0 - m) }.reduce(0, +) / Double(v.count)) }
+            let jumps = zip(angles.dropFirst(), angles).map { abs($0 - $1) }
+            return (sd(angles), sd(lengths) / (lengths.reduce(0, +) / Double(count)) * 100, jumps.reduce(0, +) / Double(jumps.count))
+        }
+        let before = wobble()
+        let clock3 = Date()
+        project.analyzeStabilization()
+        while project.isTracking { try await Task.sleep(nanoseconds: 100_000_000) }
+        print(String(format: "Stabilisation : analyse %.2f s/photo, %d/%d passages mesurés", Date().timeIntervalSince(clock3) / Double(count),
+                     project.stabMeasured, count - 1))
+        project.settings.stabResult = .locked
+        let locked = wobble()
+        project.settings.stabResult = .smooth
+        project.settings.stabSmoothness = 50
+        let smooth = wobble()
+        print(String(format: "  sans stabilisation : rotation ±%.2f°, taille ±%.1f %%, à-coups %.2f°/photo", before.angle, before.scale, before.jitter))
+        print(String(format: "  sans mouvement     : rotation ±%.2f°, taille ±%.1f %%, à-coups %.2f°/photo", locked.angle, locked.scale, locked.jitter))
+        print(String(format: "  lissé 50 %%         : rotation ±%.2f°, taille ±%.1f %%, à-coups %.2f°/photo", smooth.angle, smooth.scale, smooth.jitter))
+        if let plan = project.plan {
+            let gc = plan.refToCanvas(CGSize(width: 1920, height: 1080))
+            let drift = (0..<count).map { k -> Double in
+                let p = (gc * project.frameToRef(k, plan: plan)).apply(truth[k][0]), p0 = gc.apply(truth[0][0])
+                return hypot(Double(p.x - p0.x), Double(p.y - p0.y))
+            }.max()!
+            print(String(format: "  point gardé fixe : dérive max %.2f px (HD)", drift))
+        }
+        project.settings.stabEnabled = false
         project.settings.kind = .line
         project.editTarget = .anchor
 

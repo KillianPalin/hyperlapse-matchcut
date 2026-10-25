@@ -60,6 +60,12 @@ La police Geist (`Resources/Fonts`) est sous licence SIL Open Font License (`Res
   - **Clés de rotation à la main** : avec Point choisi, ⌥[ / ⌥] ou les boutons ±0,1° / ±1° tournent la photo autour du point
     et posent une clé, interpolée jusqu'à la suivante, ajoutée à la rotation des lignes.
   - En tournant autour d'un sujet, une horizontale penche avec la perspective : préférer une verticale ou une symétrie.
+- **Stabilisation** (Hyperlapse, après le suivi) : **Analyser** mesure comment le décor bouge encore d'une photo à
+  l'autre une fois le point aligné (rotation, taille, glissement), puis **Mouvement lissé** (Lissage en %) ou **Sans
+  mouvement** le corrige, comme le Warp Stabilizer d'After Effects (même logique, pas son code). « Garder le point
+  fixe » tourne et zoome autour du point sans le déplacer ; « Corriger l'échelle » désactivé = Preserve Scale. Appliqué à
+  l'aperçu, à la lecture et à l'export ; si les repères changent, l'app demande de refaire l'analyse. En tournant
+  autour d'un sujet, préférer Mouvement lissé : Sans mouvement force la perspective du début.
 - **Bords** (Cadrage de sortie, dans les deux outils) : **Noir** (le zoom auto cache les bandes) ou **Motion Tile** (la photo
   alignée est répétée tout autour, comme l'effet d'After Effects), avec **Miroir** pour retourner chaque copie et
   rendre les raccords invisibles. Aperçu, lecture et export suivent le réglage.
