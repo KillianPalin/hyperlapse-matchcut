@@ -1,0 +1,4 @@
+.build/
+.taste-skill/
+.DS_Store
+*.zip
