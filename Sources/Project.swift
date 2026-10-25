@@ -834,11 +834,19 @@ final class Project: ObservableObject {
     /// Number of the tracking run; a step finishing after its run was stopped is dropped.
     private var trackRun = 0
 
-    func trackForward() {
-        if isMatchCut { findMatches(); return }
+    func trackForward() { track(direction: 1) }
+
+    /// Hyperlapse: follows the anchor from this photo back to the first one (placed on the last photo, for example).
+    func trackBackward() { track(direction: -1) }
+
+    private func track(direction dir: Int) {
+        if isMatchCut { if dir > 0 { findMatches() }; return }
         guard trackTask == nil, let frame = currentFrame else { return }
         guard frame.points != nil else { notice = "Place d'abord le repère sur cette photo."; return }
-        guard current + 1 < frames.count else { notice = "C'est la dernière photo."; return }
+        guard frames.indices.contains(current + dir) else {
+            notice = dir > 0 ? "C'est la dernière photo." : "C'est la première photo : rien à suivre avant."
+            return
+        }
         registerUndo()  // Cmd-Z cancels the whole tracking run
         if frame.status != .manual {
             // Starting from a tracked photo: treat it as validated.
@@ -848,7 +856,7 @@ final class Project: ObservableObject {
         trackRun += 1
         let run = trackRun
         isTracking = true
-        trackTask = Task { [weak self] in await self?.runTracking(from: start, run: run) }
+        trackTask = Task { [weak self] in await self?.runTracking(from: start, run: run, direction: dir) }
     }
 
     /// Stops at once: the photo being analysed is dropped and the anchor can be placed by hand right away.
@@ -863,7 +871,8 @@ final class Project: ObservableObject {
         refreshAligned()
     }
 
-    private func runTracking(from start: Int, run: Int) async {
+    /// `dir`: 1 towards the last photo, -1 towards the first one.
+    private func runTracking(from start: Int, run: Int, direction dir: Int) async {
         trackingProgress = 0
         notice = nil
         let engine = TrackingEngine(previews: previews)
@@ -871,7 +880,7 @@ final class Project: ObservableObject {
         var prev = start
         var motion: [CGPoint]?
         var keyScales: [Double]?  // zoom of the previous photo relative to the hand-placed one
-        let total = Double(frames.count - 1 - start)
+        let total = Double(max(dir > 0 ? frames.count - 1 - start : start, 1))
         var lost: Int?
         var estimated = 0
         let previews = self.previews
@@ -880,7 +889,7 @@ final class Project: ObservableObject {
             guard let prevPts = frames[prev].points, let keyPts = frames[key].points else { return nil }
             let (pu, ku, nu, ks) = (frames[prev].url, frames[key].url, frames[k].url, keyScales)
             // Decode the next photos on the other cores meanwhile (a RAW takes about 2 s).
-            for u in (k + 1..<min(k + 4, frames.count)).map({ frames[$0].url }) where previews.cached(u) == nil {
+            for u in (1..<4).map({ k + $0 * dir }).filter(frames.indices.contains).map({ frames[$0].url }) where previews.cached(u) == nil {
                 Task.detached(priority: .utility) { _ = previews.image(for: u) }
             }
             return await Task.detached(priority: .userInitiated) {
@@ -902,8 +911,8 @@ final class Project: ObservableObject {
         /// between their anchors, then looked for around that estimate. A photo where the anchor is seen clearly
         /// takes its real place; one where it stays hidden keeps the estimate, marked to check.
         func fillBetween(upTo b: Int, with pts: [CGPoint]) async -> Bool {
-            guard let a = frames[prev].points, a.count == pts.count, b - prev > 1 else { return true }
-            for idx in (prev + 1)..<b {
+            guard let a = frames[prev].points, a.count == pts.count, abs(b - prev) > 1 else { return true }
+            for idx in stride(from: prev + dir, to: b, by: dir) {
                 let t = CGFloat(idx - prev) / CGFloat(b - prev)
                 let guess = zip(a, pts).map { CGPoint(x: $0.x + ($1.x - $0.x) * t, y: $0.y + ($1.y - $0.y) * t) }
                 let r = await step(to: idx, motion: zip(guess, a).map { CGPoint(x: $0.x - $1.x, y: $0.y - $1.y) })
@@ -923,14 +932,14 @@ final class Project: ObservableObject {
             return true
         }
 
-        var k = start + 1
-        while k < frames.count {
+        var k = start + dir
+        while frames.indices.contains(k) {
             if frames[k].status == .manual, let pts = frames[k].points, let pp = frames[prev].points {
                 // A photo placed by hand is the truth: continue from it.
                 motion = zip(pts, pp).map { CGPoint(x: $0.x - $1.x, y: $0.y - $1.y) }
                 key = k; prev = k
                 keyScales = nil
-                k += 1
+                k += dir
                 continue
             }
             let result = await step(to: k, motion: motion)
@@ -938,17 +947,17 @@ final class Project: ObservableObject {
             guard let result else { notice = "Impossible de lire \(frames[k].url.lastPathComponent)."; lost = k; break }
             if result.score >= 0.5 {
                 accept(result, at: k, steps: 1)
-                trackingProgress = Double(k - start) / total
+                trackingProgress = Double(abs(k - start)) / total
                 current = k
-                k += 1
+                k += dir
                 continue
             }
 
             // Lost or unclear here (someone passing in front, two look-alike places): look for the anchor on the
             // next photos, then estimate this one between the photo before and the photo after.
             var bridged = false
-            for j in 1...3 where k + j < frames.count {
-                let far = k + j
+            for j in 1...3 where frames.indices.contains(k + j * dir) {
+                let far = k + j * dir
                 if frames[far].status == .manual, let pts = frames[far].points {
                     guard await fillBetween(upTo: far, with: pts) else { return }
                     k = far
@@ -961,9 +970,9 @@ final class Project: ObservableObject {
                 if let r, r.score >= 0.75 {
                     guard await fillBetween(upTo: far, with: r.points) else { return }
                     accept(r, at: far, steps: j + 1)
-                    trackingProgress = Double(far - start) / total
+                    trackingProgress = Double(abs(far - start)) / total
                     current = far
-                    k = far + 1
+                    k = far + dir
                     bridged = true
                     break
                 }
@@ -984,7 +993,7 @@ final class Project: ObservableObject {
         if let lost {
             current = lost
             if notice == nil {
-                notice = "Repère introuvable sur la photo \(lost + 1) ni sur les 3 suivantes. Replace-le à la main (zoome avec le pincement ou ⌘+), puis relance le suivi depuis cette photo."
+                notice = "Repère introuvable sur la photo \(lost + 1) ni sur les 3 \(dir > 0 ? "suivantes" : "précédentes"). Replace-le à la main (zoome avec le pincement ou ⌘+), puis relance le suivi depuis cette photo."
             }
         } else {
             let doubtful = doubtfulCount

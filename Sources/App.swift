@@ -91,6 +91,9 @@ struct HyperlapseApp: App {
                     project.isTracking ? project.stopTracking() : project.trackForward()
                 }
                 .keyboardShortcut("t")
+                Button("Suivre vers l'arrière (jusqu'à la première photo)") { project.trackBackward() }
+                    .keyboardShortcut("t", modifiers: [.command, .option])
+                    .disabled(project.isMatchCut || project.isTracking || project.currentFrame?.points == nil || project.current == 0)
                 Button("Suivre l'orientation à partir de cette photo") { project.trackGuides() }
                     .keyboardShortcut("t", modifiers: [.command, .shift])
                     .disabled(project.isTracking || !project.guidesAvailable)
@@ -720,6 +723,18 @@ struct InspectorView: View {
                 }
                 .buttonStyle(HLButtonStyle(kind: project.isMatchCut ? .primary : .secondary, fullWidth: true, height: 32))
                 .disabled(project.isMatchCut ? project.plan == nil : project.currentFrame?.points == nil)
+                if !project.isMatchCut {
+                    Button { project.trackBackward() } label: {
+                        HStack {
+                            Text("Suivre vers l'arrière")
+                            Spacer()
+                            Text("⌥⌘T").foregroundStyle(Theme.muted)
+                        }
+                    }
+                    .buttonStyle(HLButtonStyle(kind: .ghost, fullWidth: true))
+                    .disabled(project.currentFrame?.points == nil || project.current == 0)
+                    .help("Suit le point depuis cette photo en remontant jusqu'à la première. Pratique quand le repère est le plus net sur la dernière photo.")
+                }
             }
             if project.doubtfulCount > 0, project.editTarget == .anchor {
                 Button { project.goToNextDoubtful() } label: {

@@ -80,6 +80,24 @@ struct SelfTest {
         print(String(format: "Suivi : erreur moyenne %.2f px, max %.2f px (sur 6000 px), %.2f s/photo, ", sumErr / Double(2 * (count - 1)),
                      maxErr, Date().timeIntervalSince(clock) / Double(count - 1)) + "états \(statuses)" + " · \(project.notice ?? "")")
 
+        // 3a. Backwards: anchors placed on the last photo, followed back to the first one.
+        project.clearPoints(after: -1)
+        project.setPoints(truth[count - 1], at: count - 1)
+        project.current = count - 1
+        let clockBack = Date()
+        project.trackBackward()
+        while project.isTracking { try await Task.sleep(nanoseconds: 100_000_000) }
+        var backMax = 0.0, backSum = 0.0, backN = 0
+        for k in 0..<(count - 1) {
+            for (p, q) in zip(project.frames[k].points ?? truth[count - 1], truth[k]) {
+                let e = hypot(Double(p.x - q.x), Double(p.y - q.y)) * Double(H)
+                backMax = max(backMax, e); backSum += e; backN += 1
+            }
+        }
+        let backStatuses = Dictionary(grouping: project.frames.dropLast(), by: \.status).mapValues(\.count)
+        print(String(format: "Suivi vers l'arrière : erreur moyenne %.2f px, max %.2f px, %.2f s/photo, ", backSum / Double(backN), backMax,
+                     Date().timeIntervalSince(clockBack) / Double(count - 1)) + "états \(backStatuses), arrivé photo \(project.current + 1)")
+
         // 3b. Orientation: the point holds the position, a horizontal line followed over the series sets the rotation.
         project.settings.kind = .point
         project.setPoints([truth[0][0]], at: 0)
