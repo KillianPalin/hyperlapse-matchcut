@@ -1256,13 +1256,15 @@ final class Project: ObservableObject {
         let t = frameToRef(current, plan: plan)
         let refURL = frames[refIndex].url
         let isRef = current == refIndex
+        let edges = settings.edgeMode
         let previews = self.previews
         alignTask = Task { [weak self] in
             let (a, r) = await Task.detached(priority: .userInitiated) { () -> (CGImage?, CGImage?) in
-                let a = Renderer.cgImage(Renderer.render(CIImage(cgImage: img), frameToRef: t, refToCanvas: g, canvas: canvas))
+                let a = Renderer.cgImage(Renderer.render(CIImage(cgImage: img), frameToRef: t, refToCanvas: g, canvas: canvas, edges: edges))
                 var r: CGImage?
                 if !isRef, let refImg = previews.image(for: refURL) {
-                    r = Renderer.cgImage(Renderer.render(CIImage(cgImage: refImg), frameToRef: .identity, refToCanvas: g, canvas: canvas))
+                    r = Renderer.cgImage(Renderer.render(CIImage(cgImage: refImg), frameToRef: .identity, refToCanvas: g, canvas: canvas,
+                                                         edges: edges))
                 }
                 return (a, r)
             }.value
@@ -1310,7 +1312,7 @@ final class Project: ObservableObject {
     private var playbackSignature: String {
         let pts = frames.map { $0.points.map { $0.map { "\($0.x),\($0.y)" }.joined(separator: ";") } ?? "-" }
         return "\(refIndex)|\(settings.kind)|\(settings.level)|\(settings.correctScale)|\(settings.perspective)|"
-            + "\(settings.centerAnchor)|\(settings.zoom)|\(settings.output)|\(settings.sizeMode)|" + pts.joined(separator: "|")
+            + "\(settings.centerAnchor)|\(settings.zoom)|\(settings.output)|\(settings.sizeMode)|\(settings.edgeMode)|" + pts.joined(separator: "|")
             + "|" + rotations.map { String($0) }.joined(separator: ",")
     }
 
@@ -1333,6 +1335,7 @@ final class Project: ObservableObject {
         }()
         let g = plan.refToCanvas(canvas)
         let jobs = frames.indices.map { (frames[$0].url, frameToRef($0, plan: plan)) }
+        let edges = settings.edgeMode
         let previews = self.previews
         playTask = Task { [weak self] in
             var out: [CGImage] = []
@@ -1340,7 +1343,8 @@ final class Project: ObservableObject {
                 if Task.isCancelled { return }
                 let img = await Task.detached(priority: .userInitiated) { () -> CGImage? in
                     guard let src = previews.cached(job.0) ?? ImageLoader.playback(job.0, maxPixel: 1280) else { return nil }
-                    return Renderer.cgImage(Renderer.render(CIImage(cgImage: src), frameToRef: job.1, refToCanvas: g, canvas: canvas))
+                    return Renderer.cgImage(Renderer.render(CIImage(cgImage: src), frameToRef: job.1, refToCanvas: g, canvas: canvas,
+                                                            edges: edges))
                 }.value
                 if let img { out.append(img) }
                 self?.playbackProgress = Double(i + 1) / Double(jobs.count)
@@ -1379,7 +1383,8 @@ final class Project: ObservableObject {
 
     func exportItems() -> [ExportItem]? {
         guard let plan else { return nil }
-        return frames.indices.map { ExportItem(url: frames[$0].url, frameToRef: frameToRef($0, plan: plan)) }
+        let edges = settings.edgeMode
+        return frames.indices.map { ExportItem(edges: edges, url: frames[$0].url, frameToRef: frameToRef($0, plan: plan)) }
     }
 
     // MARK: - Saving

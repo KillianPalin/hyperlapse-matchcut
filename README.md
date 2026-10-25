@@ -60,6 +60,9 @@ La police Geist (`Resources/Fonts`) est sous licence SIL Open Font License (`Res
   - **Clés de rotation à la main** : avec Point choisi, ⌥[ / ⌥] ou les boutons ±0,1° / ±1° tournent la photo autour du point
     et posent une clé, interpolée jusqu'à la suivante, ajoutée à la rotation des lignes.
   - En tournant autour d'un sujet, une horizontale penche avec la perspective : préférer une verticale ou une symétrie.
+- **Bords** (Cadrage de sortie, dans les deux outils) : **Noir** (le zoom auto cache les bandes) ou **Motion Tile** (la photo
+  alignée est répétée tout autour, comme l'effet d'After Effects), avec **Miroir** pour retourner chaque copie et
+  rendre les raccords invisibles. Aperçu, lecture et export suivent le réglage.
 - **⌘Z / ⇧⌘Z** annulent et rétablissent : placement, effacement, référence, changement de mode, et un suivi entier d'un coup.
 - **Point, Règle et Cadre gardent chacun leurs repères** : passer de l'un à l'autre ne supprime rien.
 - Piste de fiabilité sous la pellicule : orange = à la main, gris = suivi (hauteur = fiabilité), rouge = à vérifier.

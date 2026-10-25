@@ -90,7 +90,7 @@ enum Renderer {
 
     /// Places `image` (the oriented photo, any resolution) on a canvas of `canvas` pixels.
     /// `frameToRef` and `refToCanvas` come from the AlignmentPlan.
-    static func render(_ image: CIImage, frameToRef: Mat3, refToCanvas: Mat3, canvas: CGSize) -> CIImage {
+    static func render(_ image: CIImage, frameToRef: Mat3, refToCanvas: Mat3, canvas: CGSize, edges: EdgeMode = .black) -> CIImage {
         var img = image.transformed(by: CGAffineTransform(translationX: -image.extent.minX, y: -image.extent.minY))
         let h = Double(img.extent.height)
         // Core Image pixels (origin bottom-left) -> frame space -> canvas -> Core Image pixels again.
@@ -105,6 +105,8 @@ enum Renderer {
             img = img.applyingFilter("CILanczosScaleTransform", parameters: ["inputScale": s, "inputAspectRatio": 1.0])
             m = m * Mat3.scale(1 / s, 1 / s)
         }
+
+        if edges != .black, let inv = m.inverse { img = tiled(img, edges, covering: canvas, through: inv) }
 
         let warped: CIImage
         if m.isAffine {
@@ -124,6 +126,31 @@ enum Renderer {
         return warped.composited(over: CIImage(color: .black).cropped(to: rect)).cropped(to: rect)
     }
 
+    /// Motion Tile: the photo repeated all around itself (each copy flipped against its neighbour with `.mirror`, so
+    /// the seams do not show), cut to the part that lands on the canvas (`inv`: canvas pixels -> photo pixels).
+    private static func tiled(_ img: CIImage, _ mode: EdgeMode, covering canvas: CGSize, through inv: Mat3) -> CIImage {
+        let e = img.extent, w = e.width, h = e.height
+        var cell = img
+        if mode == .mirror {
+            let flipX = img.transformed(by: CGAffineTransform(a: -1, b: 0, c: 0, d: 1, tx: 2 * w, ty: 0))
+            let flipY = img.transformed(by: CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: 2 * h))
+            let flipXY = img.transformed(by: CGAffineTransform(a: -1, b: 0, c: 0, d: -1, tx: 2 * w, ty: 2 * h))
+            cell = img.composited(over: flipX).composited(over: flipY).composited(over: flipXY)
+                .cropped(to: CGRect(x: 0, y: 0, width: 2 * w, height: 2 * h))
+        }
+        let tiles = cell.applyingFilter("CIAffineTile", parameters: [kCIInputTransformKey: NSAffineTransform()])
+        // Only the part that reaches the canvas (a finite image, which the perspective filter needs).
+        let corners = [CGPoint(x: 0, y: 0), CGPoint(x: canvas.width, y: 0), CGPoint(x: canvas.width, y: canvas.height),
+                       CGPoint(x: 0, y: canvas.height)].map(inv.apply)
+        guard corners.allSatisfy({ $0.x.isFinite && $0.y.isFinite }) else { return img }
+        var r = CGRect(x: corners.map(\.x).min()!, y: corners.map(\.y).min()!, width: 0, height: 0)
+        r.size = CGSize(width: corners.map(\.x).max()! - r.minX, height: corners.map(\.y).max()! - r.minY)
+        r = r.union(e).insetBy(dx: -4, dy: -4)
+        // Never more than 9 photos wide or high (a nearly edge-on perspective would ask for an endless area).
+        r = r.intersection(e.insetBy(dx: -4 * w, dy: -4 * h)).integral
+        return tiles.cropped(to: r)
+    }
+
     static func cgImage(_ image: CIImage) -> CGImage? {
         context.createCGImage(image, from: image.extent, format: .RGBA8,
                               colorSpace: CGColorSpace(name: CGColorSpace.sRGB))
@@ -132,6 +159,7 @@ enum Renderer {
 
 /// One photo to write, with its alignment already computed.
 struct ExportItem: Sendable {
+    var edges: EdgeMode = .black
     let url: URL
     let frameToRef: Mat3
 }
@@ -162,7 +190,8 @@ enum Exporter {
 
     private static func frame(_ item: ExportItem, _ refToCanvas: Mat3, _ canvas: CGSize) throws -> CIImage {
         guard let cg = ImageLoader.full(item.url) else { throw ExportError.unreadable(item.url.lastPathComponent) }
-        return Renderer.render(CIImage(cgImage: cg), frameToRef: item.frameToRef, refToCanvas: refToCanvas, canvas: canvas)
+        return Renderer.render(CIImage(cgImage: cg), frameToRef: item.frameToRef, refToCanvas: refToCanvas, canvas: canvas,
+                               edges: item.edges)
     }
 
     private static func writeSequence(_ items: [ExportItem], _ refToCanvas: Mat3, _ canvas: CGSize, _ format: ExportFormat,

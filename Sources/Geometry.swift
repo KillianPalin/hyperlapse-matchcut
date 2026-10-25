@@ -218,6 +218,12 @@ enum Smoothing: Int, Codable, CaseIterable, Identifiable, Sendable {
     var sigma: Double { Double(rawValue) }
 }
 
+/// What fills the canvas where the aligned photo does not reach: black, or the photo repeated around itself like
+/// After Effects' Motion Tile (mirrored or not).
+enum EdgeMode: String, Codable, Sendable {
+    case black, tile, mirror
+}
+
 /// Match cut: size of the element on the output.
 enum SizeMode: String, Codable, CaseIterable, Identifiable, Sendable {
     case same, progressive
@@ -247,6 +253,11 @@ struct AlignSettings: Codable, Equatable, Sendable {
     var autoSort = true
     /// Match cut: how many frames of the video each photo lasts (1, 2 or 3).
     var holdFrames = 1
+    /// Motion Tile around the photo instead of black edges, and with Mirror the tiles are flipped so seams vanish.
+    var motionTile = false
+    var tileMirror = true
+
+    var edgeMode: EdgeMode { motionTile ? (tileMirror ? .mirror : .tile) : .black }
 
     init() {}
 
@@ -271,6 +282,8 @@ struct AlignSettings: Codable, Equatable, Sendable {
         sizeMode = try c.decodeIfPresent(SizeMode.self, forKey: .sizeMode) ?? d.sizeMode
         autoSort = try c.decodeIfPresent(Bool.self, forKey: .autoSort) ?? d.autoSort
         holdFrames = min(max(try c.decodeIfPresent(Int.self, forKey: .holdFrames) ?? d.holdFrames, 1), 3)
+        motionTile = try c.decodeIfPresent(Bool.self, forKey: .motionTile) ?? d.motionTile
+        tileMirror = try c.decodeIfPresent(Bool.self, forKey: .tileMirror) ?? d.tileMirror
     }
 
     var fitModel: FitModel {

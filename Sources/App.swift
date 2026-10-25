@@ -919,6 +919,15 @@ struct InspectorView: View {
                 Text(String(format: "%.0f %%", project.settings.zoom * 100)).monospacedDigit()
                     .foregroundStyle(Theme.muted).frame(width: 44, alignment: .trailing)
             }
+            HStack(spacing: 10) {
+                Text("Bords").frame(width: 52, alignment: .leading)
+                Segmented(options: [(false, "Noir"), (true, "Motion Tile")], selection: $project.settings.motionTile, height: 26)
+            }
+            .help("Noir : bandes noires là où la photo ne couvre pas (le zoom auto les cache). Motion Tile : la photo est répétée tout autour, comme l'effet d'After Effects.")
+            if project.settings.motionTile {
+                row("Miroir") { toggle($project.settings.tileMirror) }
+                    .help("Chaque copie est retournée par rapport à sa voisine : les raccords ne se voient pas (Mirror Edges d'After Effects).")
+            }
             Button("Zoom auto, sans bords noirs") { project.autoZoom() }
                 .buttonStyle(HLButtonStyle(kind: .secondary, fullWidth: true))
                 .disabled(project.plan == nil)
